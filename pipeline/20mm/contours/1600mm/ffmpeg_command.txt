@@ -1,0 +1,1 @@
+C:\Program Files\ANSYS Inc\v231\tp\ffmpeg\20071211\winx64\ffmpeg.exe -r 24 -y -f image2 -i C:\Users\Samuel\Desktop\results\pipeline\20mm\contours\1600mm/AnimationFrame%06d.jpg -vcodec mpeg4 -b 40000000 C:\Users\Samuel\Documents\CAE\wellhead_gas_leak_files\user_files/Copy of horizonta_pipe_leak.mp4

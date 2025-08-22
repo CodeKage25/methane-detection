@@ -1,0 +1,1 @@
+C:\Program Files\ANSYS Inc\v231\tp\ffmpeg\20071211\winx64\ffmpeg.exe -r 24 -y -f image2 -i C:\Users\Samuel\Desktop\results\pipeline\30mm\contours/AnimationFrame%06d.jpg -vcodec mpeg4 -b 40000000 C:\Users\Samuel\Documents/FFF 4.mp4
