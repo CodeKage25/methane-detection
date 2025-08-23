@@ -57,7 +57,7 @@ warnings.filterwarnings('ignore')
 
 # Set page configuration
 st.set_page_config(
-    page_title="🔥 Methane Leak Detection System",
+    page_title="Methane Leak Detection System",
     page_icon="🔥",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -506,17 +506,17 @@ class BalancedModelTrainer:
             # Predictions
             best_model = grid_search.best_estimator_
             y_pred = best_model.predict(X_val_scaled)
-            y_proba = best_model.predict_proba(X_val_scaled)[:, 1]
+            y_proba = best_model.predict_proba(X_val_scaled)[:, 1] if best_model.predict_proba(X_val_scaled).shape[1] > 1 else np.full(len(y_val), 0.5)
             
             # Store results
             self.models[name] = best_model
             self.results[name] = {
                 'accuracy': accuracy_score(y_val, y_pred),
                 'balanced_accuracy': balanced_accuracy_score(y_val, y_pred),
-                'roc_auc': roc_auc_score(y_val, y_proba),
-                'f1_score': f1_score(y_val, y_pred),
-                'precision': precision_score(y_val, y_pred),
-                'recall': recall_score(y_val, y_pred),
+                'roc_auc': roc_auc_score(y_val, y_proba) if len(np.unique(y_val)) > 1 else 0.5,
+                'f1_score': f1_score(y_val, y_pred) if len(np.unique(y_val)) > 1 else 0.0,
+                'precision': precision_score(y_val, y_pred, zero_division=0),
+                'recall': recall_score(y_val, y_pred, zero_division=0),
                 'training_time': training_time,
                 'y_pred': y_pred,
                 'y_proba': y_proba
@@ -577,13 +577,13 @@ def make_prediction(x_coord: float, y_coord: float, temperature: float, hole_siz
         prediction = trainer.models[trainer.best_model].predict(X_sample_scaled)[0]
         probability = trainer.models[trainer.best_model].predict_proba(X_sample_scaled)[0]
         
-        leak_prob = probability[1]
-        confidence = max(probability)
+        leak_prob = probability[1] if len(probability) > 1 else 0.5
+        confidence = max(probability) if len(probability) > 1 else 0.5
         
         return {
             'prediction': int(prediction),
             'leak_probability': leak_prob,
-            'no_leak_probability': probability[0],
+            'no_leak_probability': probability[0] if len(probability) > 1 else 0.5,
             'confidence': confidence,
             'risk_level': 'HIGH' if leak_prob > 0.7 else 'MEDIUM' if leak_prob > 0.4 else 'LOW',
             'model_used': trainer.best_model
@@ -882,7 +882,7 @@ def balance_dataset(df: pd.DataFrame, target_ratio: float) -> pd.DataFrame:
     return balanced_df
 
 def show_data_analysis_page():
-    """Data analysis page"""
+    """Data analysis page with FIXED temperature statistics"""
     st.markdown('<h2 class="sub-header">📊 Data Analysis & Visualization</h2>', unsafe_allow_html=True)
     
     if st.session_state.combined_df.empty:
@@ -909,6 +909,14 @@ def show_data_analysis_page():
     with col5:
         st.metric("Features", len(df.columns))
     
+    # Check data balance and show warning if needed
+    unique_classes = df['leak_status'].unique()
+    if len(unique_classes) == 1:
+        if unique_classes[0] == 1:
+            st.warning("⚠️ Dataset contains only LEAK samples. Consider adding no-leak samples for better balance.")
+        else:
+            st.warning("⚠️ Dataset contains only NO-LEAK samples. Consider adding leak samples for better balance.")
+    
     # Balance quality assessment
     target_ratio = Config.TARGET_LEAK_RATIO
     actual_ratio = df['leak_status'].mean()
@@ -916,13 +924,10 @@ def show_data_analysis_page():
     
     if deviation < 0.05:
         balance_status = "🎉 EXCELLENT"
-        balance_color = "success"
     elif deviation < 0.10:
         balance_status = "✅ GOOD"
-        balance_color = "success"
     else:
         balance_status = "⚠️ NEEDS IMPROVEMENT"
-        balance_color = "warning"
     
     st.markdown(f"**Balance Quality**: {balance_status} (Target: {target_ratio:.1%}, Actual: {actual_ratio:.1%})")
     
@@ -938,8 +943,12 @@ def show_data_analysis_page():
         leak_data = df[df['leak_status'] == 1]['temperature']
         no_leak_data = df[df['leak_status'] == 0]['temperature']
         
-        ax1.hist(no_leak_data, bins=50, alpha=0.7, label=f'No Leak ({len(no_leak_data):,})', color='blue', density=True)
-        ax1.hist(leak_data, bins=50, alpha=0.7, label=f'Leak ({len(leak_data):,})', color='red', density=True)
+        # Only plot histograms if data exists for each class
+        if len(no_leak_data) > 0:
+            ax1.hist(no_leak_data, bins=50, alpha=0.7, label=f'No Leak ({len(no_leak_data):,})', color='blue', density=True)
+        if len(leak_data) > 0:
+            ax1.hist(leak_data, bins=50, alpha=0.7, label=f'Leak ({len(leak_data):,})', color='red', density=True)
+        
         ax1.set_xlabel('Temperature (K)')
         ax1.set_ylabel('Density')
         ax1.set_title('Temperature Distribution by Leak Status')
@@ -947,143 +956,187 @@ def show_data_analysis_page():
         ax1.grid(True, alpha=0.3)
         
         # Box plot by hole size
-        hole_sizes = sorted(df['hole_size'].unique())
-        temp_by_hole = [df[df['hole_size'] == hs]['temperature'] for hs in hole_sizes]
-        
-        bp = ax2.boxplot(temp_by_hole, labels=hole_sizes, patch_artist=True)
-        colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow']
-        for patch, color in zip(bp['boxes'], colors[:len(bp['boxes'])]):
-            patch.set_facecolor(color)
-        ax2.set_xlabel('Hole Size')
-        ax2.set_ylabel('Temperature (K)')
-        ax2.set_title('Temperature Distribution by Hole Size')
-        ax2.grid(True, alpha=0.3)
+        if 'hole_size' in df.columns:
+            hole_sizes = sorted(df['hole_size'].unique())
+            temp_by_hole = [df[df['hole_size'] == hs]['temperature'] for hs in hole_sizes]
+            
+            bp = ax2.boxplot(temp_by_hole, labels=hole_sizes, patch_artist=True)
+            colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow']
+            for patch, color in zip(bp['boxes'], colors[:len(bp['boxes'])]):
+                patch.set_facecolor(color)
+            ax2.set_xlabel('Hole Size')
+            ax2.set_ylabel('Temperature (K)')
+            ax2.set_title('Temperature Distribution by Hole Size')
+            ax2.grid(True, alpha=0.3)
+        else:
+            # If no hole_size column, show overall temperature distribution
+            ax2.hist(df['temperature'], bins=50, alpha=0.7, color='green')
+            ax2.set_xlabel('Temperature (K)')
+            ax2.set_ylabel('Frequency')
+            ax2.set_title('Overall Temperature Distribution')
+            ax2.grid(True, alpha=0.3)
         
         st.pyplot(fig)
         
-        # Temperature statistics
+        # Temperature statistics - FIXED VERSION
         st.markdown("#### 🌡️ Temperature Statistics")
-        temp_stats = df.groupby('leak_status')['temperature'].agg(['count', 'mean', 'std', 'min', 'max']).round(2)
-        temp_stats.index = ['No Leak', 'Leak']
-        st.dataframe(temp_stats, use_container_width=True)
+        try:
+            # Group by leak status and calculate statistics
+            temp_grouped = df.groupby('leak_status')['temperature'].agg(['count', 'mean', 'std', 'min', 'max']).round(2)
+            
+            # Create proper index labels based on actual groups present
+            index_labels = []
+            for status in temp_grouped.index:
+                if status == 0:
+                    index_labels.append('No Leak')
+                else:
+                    index_labels.append('Leak')
+            
+            # Only assign new index if we have the right number of labels
+            if len(index_labels) == len(temp_grouped.index):
+                temp_grouped.index = index_labels
+            
+            st.dataframe(temp_grouped, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Error calculating temperature statistics: {e}")
+            # Fallback: show basic statistics
+            st.markdown("**Basic Temperature Statistics:**")
+            st.write(f"- Mean: {df['temperature'].mean():.2f}K")
+            st.write(f"- Std: {df['temperature'].std():.2f}K")
+            st.write(f"- Min: {df['temperature'].min():.2f}K")
+            st.write(f"- Max: {df['temperature'].max():.2f}K")
     
     with tab2:
         # Spatial distribution
-        fig = plt.figure(figsize=(12, 8))
-        
-        colors = ['blue' if x == 0 else 'red' for x in df['leak_status']]
-        sizes = [20 if x == 1 else 5 for x in df['leak_status']]
-        
-        scatter = plt.scatter(df['x-coordinate'], df['y-coordinate'], 
-                           c=colors, alpha=0.6, s=sizes)
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.title('Spatial Distribution (Red=Leak, Blue=No Leak)')
-        plt.grid(True, alpha=0.3)
-        
-        # Add legend
-        import matplotlib.patches as mpatches
-        red_patch = mpatches.Patch(color='red', label='Leak')
-        blue_patch = mpatches.Patch(color='blue', label='No Leak')
-        plt.legend(handles=[red_patch, blue_patch])
-        
-        st.pyplot(fig)
-        
-        # 3D visualization with Plotly
-        st.markdown("#### 🌐 3D Spatial-Temperature Distribution")
-        
-        # Sample data if too large
-        if len(df) > 5000:
-            sample_df = df.sample(n=5000, random_state=42)
-            st.info("Showing sample of 5000 points for performance")
+        if 'x-coordinate' in df.columns and 'y-coordinate' in df.columns:
+            fig = plt.figure(figsize=(12, 8))
+            
+            colors = ['blue' if x == 0 else 'red' for x in df['leak_status']]
+            sizes = [20 if x == 1 else 5 for x in df['leak_status']]
+            
+            scatter = plt.scatter(df['x-coordinate'], df['y-coordinate'], 
+                               c=colors, alpha=0.6, s=sizes)
+            plt.xlabel('X Coordinate')
+            plt.ylabel('Y Coordinate')
+            plt.title('Spatial Distribution (Red=Leak, Blue=No Leak)')
+            plt.grid(True, alpha=0.3)
+            
+            # Add legend
+            import matplotlib.patches as mpatches
+            red_patch = mpatches.Patch(color='red', label='Leak')
+            blue_patch = mpatches.Patch(color='blue', label='No Leak')
+            plt.legend(handles=[red_patch, blue_patch])
+            
+            st.pyplot(fig)
+            
+            # 3D visualization with Plotly
+            st.markdown("#### 🌐 3D Spatial-Temperature Distribution")
+            
+            # Sample data if too large
+            if len(df) > 5000:
+                sample_df = df.sample(n=5000, random_state=42)
+                st.info("Showing sample of 5000 points for performance")
+            else:
+                sample_df = df
+            
+            colors_3d = ['blue' if x == 0 else 'red' for x in sample_df['leak_status']]
+            sizes_3d = [4 if x == 1 else 2 for x in sample_df['leak_status']]
+            
+            # Create hover text safely
+            hover_texts = []
+            for i, row in sample_df.iterrows():
+                status_text = '🔥 Leak' if row['leak_status'] else '✅ No Leak'
+                hole_text = row.get('hole_size', 'Unknown')
+                conf_text = row.get('leak_confidence', 0.0)
+                hover_texts.append(f"Status: {status_text}<br>Hole: {hole_text}<br>Confidence: {conf_text:.2f}")
+            
+            fig_3d = go.Figure(data=go.Scatter3d(
+                x=sample_df['x-coordinate'],
+                y=sample_df['y-coordinate'],
+                z=sample_df['temperature'],
+                mode='markers',
+                marker=dict(
+                    color=colors_3d,
+                    size=sizes_3d,
+                    opacity=0.7
+                ),
+                text=hover_texts,
+                hovertemplate='X: %{x}<br>Y: %{y}<br>Temp: %{z:.1f}K<br>%{text}<extra></extra>'
+            ))
+            
+            fig_3d.update_layout(
+                title='3D Spatial-Temperature Distribution',
+                scene=dict(
+                    xaxis_title='X Coordinate',
+                    yaxis_title='Y Coordinate',
+                    zaxis_title='Temperature (K)'
+                ),
+                height=600
+            )
+            
+            st.plotly_chart(fig_3d, use_container_width=True)
         else:
-            sample_df = df
-        
-        colors_3d = ['blue' if x == 0 else 'red' for x in sample_df['leak_status']]
-        sizes_3d = [4 if x == 1 else 2 for x in sample_df['leak_status']]
-        
-        fig_3d = go.Figure(data=go.Scatter3d(
-            x=sample_df['x-coordinate'],
-            y=sample_df['y-coordinate'],
-            z=sample_df['temperature'],
-            mode='markers',
-            marker=dict(
-                color=colors_3d,
-                size=sizes_3d,
-                opacity=0.7
-            ),
-            text=[f"Status: {'🔥 Leak' if status else '✅ No Leak'}<br>Hole: {hole}<br>Confidence: {conf:.2f}" 
-                  for status, hole, conf in zip(sample_df['leak_status'], sample_df['hole_size'], 
-                                               sample_df['leak_confidence'])],
-            hovertemplate='X: %{x}<br>Y: %{y}<br>Temp: %{z:.1f}K<br>%{text}<extra></extra>'
-        ))
-        
-        fig_3d.update_layout(
-            title='3D Spatial-Temperature Distribution',
-            scene=dict(
-                xaxis_title='X Coordinate',
-                yaxis_title='Y Coordinate',
-                zaxis_title='Temperature (K)'
-            ),
-            height=600
-        )
-        
-        st.plotly_chart(fig_3d, use_container_width=True)
+            st.warning("⚠️ No coordinate data available for spatial visualization.")
     
     with tab3:
         # Hole size analysis
-        st.markdown("#### 🕳️ Leak Distribution by Hole Size")
-        
-        hole_analysis = []
-        for hole_size in sorted(df['hole_size'].unique()):
-            subset = df[df['hole_size'] == hole_size]
-            leak_count = subset['leak_status'].sum()
-            total_count = len(subset)
-            leak_rate = leak_count / total_count if total_count > 0 else 0
+        if 'hole_size' in df.columns:
+            st.markdown("#### 🕳️ Leak Distribution by Hole Size")
             
-            hole_analysis.append({
-                'Hole Size': hole_size,
-                'Total Samples': total_count,
-                'Leak Samples': leak_count,
-                'No-Leak Samples': total_count - leak_count,
-                'Leak Rate': f"{leak_rate:.1%}",
-                'Avg Temperature': f"{subset['temperature'].mean():.1f}K"
-            })
-        
-        hole_df = pd.DataFrame(hole_analysis)
-        st.dataframe(hole_df, use_container_width=True)
-        
-        # Visualization
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-        
-        # Stacked bar chart
-        hole_sizes = hole_df['Hole Size']
-        leak_counts = hole_df['Leak Samples']
-        no_leak_counts = hole_df['No-Leak Samples']
-        
-        ax1.bar(hole_sizes, no_leak_counts, label='No Leak', color='blue', alpha=0.7)
-        ax1.bar(hole_sizes, leak_counts, bottom=no_leak_counts, label='Leak', color='red', alpha=0.7)
-        ax1.set_xlabel('Hole Size')
-        ax1.set_ylabel('Sample Count')
-        ax1.set_title('Sample Distribution by Hole Size')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # Leak rate chart
-        leak_rates = [float(rate.rstrip('%')) / 100 for rate in hole_df['Leak Rate']]
-        bars = ax2.bar(hole_sizes, leak_rates, color=['lightcoral' if rate > 0.5 else 'lightblue' for rate in leak_rates])
-        ax2.set_xlabel('Hole Size')
-        ax2.set_ylabel('Leak Rate')
-        ax2.set_title('Leak Rate by Hole Size')
-        ax2.set_ylim(0, 1)
-        ax2.grid(True, alpha=0.3)
-        
-        # Add value labels
-        for bar, rate in zip(bars, leak_rates):
-            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
-                    f'{rate:.1%}', ha='center', va='bottom')
-        
-        st.pyplot(fig)
+            hole_analysis = []
+            for hole_size in sorted(df['hole_size'].unique()):
+                subset = df[df['hole_size'] == hole_size]
+                leak_count = subset['leak_status'].sum()
+                total_count = len(subset)
+                leak_rate = leak_count / total_count if total_count > 0 else 0
+                
+                hole_analysis.append({
+                    'Hole Size': hole_size,
+                    'Total Samples': total_count,
+                    'Leak Samples': leak_count,
+                    'No-Leak Samples': total_count - leak_count,
+                    'Leak Rate': f"{leak_rate:.1%}",
+                    'Avg Temperature': f"{subset['temperature'].mean():.1f}K"
+                })
+            
+            hole_df = pd.DataFrame(hole_analysis)
+            st.dataframe(hole_df, use_container_width=True)
+            
+            # Visualization
+            if len(hole_df) > 0:
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+                
+                # Stacked bar chart
+                hole_sizes = hole_df['Hole Size']
+                leak_counts = hole_df['Leak Samples']
+                no_leak_counts = hole_df['No-Leak Samples']
+                
+                ax1.bar(hole_sizes, no_leak_counts, label='No Leak', color='blue', alpha=0.7)
+                ax1.bar(hole_sizes, leak_counts, bottom=no_leak_counts, label='Leak', color='red', alpha=0.7)
+                ax1.set_xlabel('Hole Size')
+                ax1.set_ylabel('Sample Count')
+                ax1.set_title('Sample Distribution by Hole Size')
+                ax1.legend()
+                ax1.grid(True, alpha=0.3)
+                
+                # Leak rate chart
+                leak_rates = [float(rate.rstrip('%')) / 100 for rate in hole_df['Leak Rate']]
+                bars = ax2.bar(hole_sizes, leak_rates, color=['lightcoral' if rate > 0.5 else 'lightblue' for rate in leak_rates])
+                ax2.set_xlabel('Hole Size')
+                ax2.set_ylabel('Leak Rate')
+                ax2.set_title('Leak Rate by Hole Size')
+                ax2.set_ylim(0, 1)
+                ax2.grid(True, alpha=0.3)
+                
+                # Add value labels
+                for bar, rate in zip(bars, leak_rates):
+                    ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
+                            f'{rate:.1%}', ha='center', va='bottom')
+                
+                st.pyplot(fig)
+        else:
+            st.warning("⚠️ No hole size information available.")
     
     with tab4:
         # Feature correlations
@@ -1130,6 +1183,10 @@ def show_data_analysis_page():
                 corr_df = pd.DataFrame(correlations[:15], columns=['Feature', 'Correlation'])
                 corr_df['Correlation'] = corr_df['Correlation'].round(3)
                 st.dataframe(corr_df, use_container_width=True)
+            else:
+                st.warning("⚠️ No valid correlations found.")
+        else:
+            st.warning("⚠️ No leak status information available for correlation analysis.")
 
 def show_model_training_page():
     """Model training page"""
@@ -1140,6 +1197,12 @@ def show_model_training_page():
         return
     
     df = st.session_state.combined_df
+    
+    # Check for class balance issues
+    unique_classes = df['leak_status'].nunique()
+    if unique_classes < 2:
+        st.error("⚠️ Cannot train models: Dataset contains only one class. Please ensure your data has both leak and no-leak samples.")
+        return
     
     # Training configuration
     st.markdown("### ⚙️ Training Configuration")
@@ -1263,11 +1326,12 @@ def show_model_training_page():
                 
                 for i, (model_name, result) in enumerate(results.items()):
                     y_proba = result['y_proba']
-                    fpr, tpr, _ = roc_curve(y_val, y_proba)
-                    auc_score = auc(fpr, tpr)
-                    
-                    ax.plot(fpr, tpr, color=colors[i % len(colors)], linewidth=2, 
-                           label=f'{model_name.replace("Balanced", "")} (AUC = {auc_score:.3f})')
+                    if len(np.unique(y_val)) > 1:  # Only plot ROC if we have both classes
+                        fpr, tpr, _ = roc_curve(y_val, y_proba)
+                        auc_score = auc(fpr, tpr)
+                        
+                        ax.plot(fpr, tpr, color=colors[i % len(colors)], linewidth=2, 
+                               label=f'{model_name.replace("Balanced", "")} (AUC = {auc_score:.3f})')
                 
                 ax.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
                 ax.set_xlabel('False Positive Rate')
@@ -1334,16 +1398,16 @@ def show_model_training_page():
                     X_test_scaled = X_test
                 
                 y_pred = best_model.predict(X_test_scaled)
-                y_proba = best_model.predict_proba(X_test_scaled)[:, 1]
+                y_proba = best_model.predict_proba(X_test_scaled)[:, 1] if best_model.predict_proba(X_test_scaled).shape[1] > 1 else np.full(len(y_test), 0.5)
                 
                 # Calculate metrics
                 test_results = {
                     'accuracy': accuracy_score(y_test, y_pred),
                     'balanced_accuracy': balanced_accuracy_score(y_test, y_pred),
-                    'roc_auc': roc_auc_score(y_test, y_proba),
-                    'f1_score': f1_score(y_test, y_pred),
-                    'precision': precision_score(y_test, y_pred),
-                    'recall': recall_score(y_test, y_pred)
+                    'roc_auc': roc_auc_score(y_test, y_proba) if len(np.unique(y_test)) > 1 else 0.5,
+                    'f1_score': f1_score(y_test, y_pred) if len(np.unique(y_test)) > 1 else 0.0,
+                    'precision': precision_score(y_test, y_pred, zero_division=0),
+                    'recall': recall_score(y_test, y_pred, zero_division=0)
                 }
                 
                 # Display results
