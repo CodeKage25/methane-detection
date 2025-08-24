@@ -1,0 +1,36 @@
+MEGA BALANCED DATASET VALIDATION SUMMARY
+============================================================
+
+FIXED CLASSIFICATION PARAMETERS:
+- Base threshold: 320K (increased from 305K)
+- Outlier threshold: >2.5 std, >25% ratio
+- High temp ratio: >30%
+- Mean threshold: base + 5K
+- Std threshold: 15K * factor
+- Max threshold: base + 20K
+- Decision: requires 4/5 criteria
+
+20MM:
+  Samples: 268,657
+  Leak: 119,942 (44.6%)
+  No-leak: 148,715
+  Validation: 10/10 leak, 40/40 no-leak correct
+
+25MM:
+  Samples: 268,937
+  Leak: 119,428 (44.4%)
+  No-leak: 149,509
+  Validation: 20/20 leak, 30/30 no-leak correct
+
+30MM:
+  Samples: 269,378
+  Leak: 119,418 (44.3%)
+  No-leak: 149,960
+  Validation: 13/13 leak, 37/37 no-leak correct
+
+40MM:
+  Samples: 269,601
+  Leak: 120,040 (44.5%)
+  No-leak: 149,561
+  Validation: 27/27 leak, 23/23 no-leak correct
+

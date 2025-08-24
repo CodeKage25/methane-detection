@@ -118,7 +118,7 @@ class Config:
     RANDOM_STATE = 42
     
     # BALANCED CLASSIFICATION PARAMETERS
-    TEMPERATURE_THRESHOLD = 305
+    TEMPERATURE_THRESHOLD = 320
     SPATIAL_ZONES = 20
     ROLLING_WINDOW = 5
     TARGET_LEAK_RATIO = 0.4
@@ -257,9 +257,9 @@ class BalancedDataLoader:
         
         # Statistical outliers
         z_scores = np.abs(stats.zscore(df['temperature']))
-        outlier_count = np.sum(z_scores > 2)
+        outlier_count = np.sum(z_scores > 2.5)
         outlier_ratio = outlier_count / len(df)
-        criteria['outliers'] = outlier_ratio > 0.1 * factor
+        criteria['outliers'] = outlier_ratio > 0.25 * factor
         if criteria['outliers']:
             criteria_met.append(f"Outlier ratio ({outlier_ratio:.1%}) significant")
         
@@ -271,7 +271,7 @@ class BalancedDataLoader:
             criteria_met.append(f"High temp ratio ({high_temp_ratio:.1%}) > threshold")
         
         # Mean temperature
-        mean_threshold = base_threshold - 3
+        mean_threshold = base_threshold + 3
         criteria['mean_temp'] = temp_stats['mean'] > mean_threshold
         if criteria['mean_temp']:
             criteria_met.append(f"Mean temp ({temp_stats['mean']:.1f}K) > {mean_threshold:.1f}K")
@@ -283,7 +283,7 @@ class BalancedDataLoader:
             criteria_met.append(f"Temp std ({temp_stats['std']:.1f}) > {std_threshold:.1f}")
         
         # Maximum temperature
-        max_threshold = base_threshold + (5 * factor)
+        max_threshold = base_threshold + (20 * factor)
         criteria['max_temp'] = temp_stats['max'] > max_threshold
         if criteria['max_temp']:
             criteria_met.append(f"Max temp ({temp_stats['max']:.1f}K) > {max_threshold:.1f}K")
@@ -294,16 +294,16 @@ class BalancedDataLoader:
         confidence = criteria_count / total_criteria
         
         if Config.SENSITIVITY_LEVEL == 'strict':
-            is_leak = criteria_count >= (total_criteria - 1)
+            is_leak = criteria_count >= (total_criteria)
         elif Config.SENSITIVITY_LEVEL == 'sensitive':
-            is_leak = criteria_count >= 1
+            is_leak = criteria_count >= 2
         else:  # 'balanced'
-            is_leak = criteria_count >= (total_criteria // 2)
+            is_leak = criteria_count >= 4 
         
         # Additional boost for larger holes
-        if hole_size in ['30mm', '40mm'] and criteria_count >= 2:
+        if hole_size in ['30mm', '40mm'] and criteria_count >= 4:
             is_leak = True
-            confidence = min(1.0, confidence + 0.2)
+            confidence = min(1.0, confidence + 0.1)
         
         return {
             'leak_status': int(is_leak),
