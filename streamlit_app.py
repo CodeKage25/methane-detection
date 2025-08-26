@@ -230,89 +230,69 @@ class BalancedDataLoader:
             st.error(f"⚠️ Could not parse {file_path.name}: {e}")
             return pd.DataFrame()
     
-    @staticmethod
-    def balanced_leak_classification(df: pd.DataFrame, hole_size: str, file_idx: int = 0) -> Dict:
-        """BALANCED leak classification with multiple strategies"""
-        if df.empty or 'temperature' not in df.columns:
-            return {'leak_status': 0, 'confidence': 0.0, 'criteria_met': [], 'method': 'empty'}
-        
-        temp_stats = {
-            'mean': df['temperature'].mean(),
-            'max': df['temperature'].max(),
-            'min': df['temperature'].min(),
-            'std': df['temperature'].std(),
-            'q75': df['temperature'].quantile(0.75),
-            'q90': df['temperature'].quantile(0.90),
-            'q95': df['temperature'].quantile(0.95),
+    # Replace this method in your BalancedDataLoader class
+
+@staticmethod
+def balanced_leak_classification(df: pd.DataFrame, hole_size: str, file_idx: int = 0) -> Dict:
+    """SIMPLIFIED leak classification that actually works"""
+    if df.empty or 'temperature' not in df.columns:
+        return {'leak_status': 0, 'confidence': 0.0, 'criteria_met': [], 'method': 'empty'}
+    
+    # Simple, reliable threshold-based approach
+    base_threshold = 308.0  # Realistic threshold between ambient (300K) and leak (312K+)
+    
+    # Hole size adjustments (smaller effect than before)
+    hole_factors = {'20mm': 0.95, '25mm': 1.0, '30mm': 1.05, '40mm': 1.1}
+    factor = hole_factors.get(hole_size, 1.0)
+    threshold = base_threshold * factor
+    
+    # Calculate key metrics
+    temp_mean = df['temperature'].mean()
+    temp_max = df['temperature'].max()
+    high_temp_count = (df['temperature'] > threshold).sum()
+    high_temp_ratio = high_temp_count / len(df)
+    
+    criteria_met = []
+    
+    # Simple criteria (much more lenient)
+    # Criterion 1: High temperature ratio
+    high_ratio_threshold = 0.25  # 25% of readings above threshold
+    criterion_1 = high_temp_ratio > high_ratio_threshold
+    if criterion_1:
+        criteria_met.append(f"High temp ratio: {high_temp_ratio:.1%} > {high_ratio_threshold:.1%}")
+    
+    # Criterion 2: Mean temperature elevated
+    mean_threshold = threshold - 2  # 2K below main threshold
+    criterion_2 = temp_mean > mean_threshold
+    if criterion_2:
+        criteria_met.append(f"Mean temp elevated: {temp_mean:.1f}K > {mean_threshold:.1f}K")
+    
+    # Criterion 3: Maximum temperature significantly elevated
+    max_threshold = threshold + 8  # 8K above main threshold
+    criterion_3 = temp_max > max_threshold
+    if criterion_3:
+        criteria_met.append(f"Max temp high: {temp_max:.1f}K > {max_threshold:.1f}K")
+    
+    # Decision: Need at least 2 out of 3 criteria (much more balanced)
+    criteria_count = sum([criterion_1, criterion_2, criterion_3])
+    is_leak = criteria_count >= 2
+    
+    # Confidence based on how many criteria are met
+    confidence = criteria_count / 3.0
+    
+    return {
+        'leak_status': int(is_leak),
+        'confidence': confidence,
+        'criteria_met': criteria_met,
+        'criteria_count': criteria_count,
+        'method': 'simplified_balanced',
+        'temp_stats': {
+            'mean': temp_mean,
+            'max': temp_max,
+            'threshold_used': threshold,
+            'high_temp_ratio': high_temp_ratio
         }
-        
-        # Hole size factors
-        hole_factors = {'20mm': 0.8, '25mm': 1.0, '30mm': 1.2, '40mm': 1.5}
-        factor = hole_factors.get(hole_size, 1.0)
-        
-        # Multiple classification criteria
-        base_threshold = Config.TEMPERATURE_THRESHOLD * factor
-        criteria = {}
-        criteria_met = []
-        
-        # Statistical outliers
-        z_scores = np.abs(stats.zscore(df['temperature']))
-        outlier_count = np.sum(z_scores > 2.5)
-        outlier_ratio = outlier_count / len(df)
-        criteria['outliers'] = outlier_ratio > 0.25 * factor
-        if criteria['outliers']:
-            criteria_met.append(f"Outlier ratio ({outlier_ratio:.1%}) significant")
-        
-        # High temperature ratio
-        high_temp_count = np.sum(df['temperature'] > base_threshold)
-        high_temp_ratio = high_temp_count / len(df)
-        criteria['high_temp_ratio'] = high_temp_ratio > 0.15 * factor
-        if criteria['high_temp_ratio']:
-            criteria_met.append(f"High temp ratio ({high_temp_ratio:.1%}) > threshold")
-        
-        # Mean temperature
-        mean_threshold = base_threshold + 3
-        criteria['mean_temp'] = temp_stats['mean'] > mean_threshold
-        if criteria['mean_temp']:
-            criteria_met.append(f"Mean temp ({temp_stats['mean']:.1f}K) > {mean_threshold:.1f}K")
-        
-        # Temperature variability
-        std_threshold = 8 * factor
-        criteria['temp_variance'] = temp_stats['std'] > std_threshold
-        if criteria['temp_variance']:
-            criteria_met.append(f"Temp std ({temp_stats['std']:.1f}) > {std_threshold:.1f}")
-        
-        # Maximum temperature
-        max_threshold = base_threshold + (20 * factor)
-        criteria['max_temp'] = temp_stats['max'] > max_threshold
-        if criteria['max_temp']:
-            criteria_met.append(f"Max temp ({temp_stats['max']:.1f}K) > {max_threshold:.1f}K")
-        
-        # Decision logic
-        criteria_count = sum(criteria.values())
-        total_criteria = len(criteria)
-        confidence = criteria_count / total_criteria
-        
-        if Config.SENSITIVITY_LEVEL == 'strict':
-            is_leak = criteria_count >= (total_criteria)
-        elif Config.SENSITIVITY_LEVEL == 'sensitive':
-            is_leak = criteria_count >= 2
-        else:  # 'balanced'
-            is_leak = criteria_count >= 4 
-        
-        # Additional boost for larger holes
-        if hole_size in ['30mm', '40mm'] and criteria_count >= 4:
-            is_leak = True
-            confidence = min(1.0, confidence + 0.1)
-        
-        return {
-            'leak_status': int(is_leak),
-            'confidence': confidence,
-            'criteria_met': criteria_met,
-            'criteria_count': criteria_count,
-            'method': f'balanced_{Config.SENSITIVITY_LEVEL}',
-            'temp_stats': temp_stats
-        }
+    }
 
 class AdvancedFeatureEngineer:
     """Feature engineering for Streamlit app"""
