@@ -118,7 +118,7 @@ class Config:
     RANDOM_STATE = 42
     
     # BALANCED CLASSIFICATION PARAMETERS
-    TEMPERATURE_THRESHOLD = 320
+    TEMPERATURE_THRESHOLD = 308  # UPDATED to realistic threshold
     SPATIAL_ZONES = 20
     ROLLING_WINDOW = 5
     TARGET_LEAK_RATIO = 0.4
@@ -230,69 +230,67 @@ class BalancedDataLoader:
             st.error(f"⚠️ Could not parse {file_path.name}: {e}")
             return pd.DataFrame()
     
-    # Replace this method in your BalancedDataLoader class
-
-@staticmethod
-def balanced_leak_classification(df: pd.DataFrame, hole_size: str, file_idx: int = 0) -> Dict:
-    """SIMPLIFIED leak classification that actually works"""
-    if df.empty or 'temperature' not in df.columns:
-        return {'leak_status': 0, 'confidence': 0.0, 'criteria_met': [], 'method': 'empty'}
-    
-    # Simple, reliable threshold-based approach
-    base_threshold = 308.0  # Realistic threshold between ambient (300K) and leak (312K+)
-    
-    # Hole size adjustments (smaller effect than before)
-    hole_factors = {'20mm': 0.95, '25mm': 1.0, '30mm': 1.05, '40mm': 1.1}
-    factor = hole_factors.get(hole_size, 1.0)
-    threshold = base_threshold * factor
-    
-    # Calculate key metrics
-    temp_mean = df['temperature'].mean()
-    temp_max = df['temperature'].max()
-    high_temp_count = (df['temperature'] > threshold).sum()
-    high_temp_ratio = high_temp_count / len(df)
-    
-    criteria_met = []
-    
-    # Simple criteria (much more lenient)
-    # Criterion 1: High temperature ratio
-    high_ratio_threshold = 0.25  # 25% of readings above threshold
-    criterion_1 = high_temp_ratio > high_ratio_threshold
-    if criterion_1:
-        criteria_met.append(f"High temp ratio: {high_temp_ratio:.1%} > {high_ratio_threshold:.1%}")
-    
-    # Criterion 2: Mean temperature elevated
-    mean_threshold = threshold - 2  # 2K below main threshold
-    criterion_2 = temp_mean > mean_threshold
-    if criterion_2:
-        criteria_met.append(f"Mean temp elevated: {temp_mean:.1f}K > {mean_threshold:.1f}K")
-    
-    # Criterion 3: Maximum temperature significantly elevated
-    max_threshold = threshold + 8  # 8K above main threshold
-    criterion_3 = temp_max > max_threshold
-    if criterion_3:
-        criteria_met.append(f"Max temp high: {temp_max:.1f}K > {max_threshold:.1f}K")
-    
-    # Decision: Need at least 2 out of 3 criteria (much more balanced)
-    criteria_count = sum([criterion_1, criterion_2, criterion_3])
-    is_leak = criteria_count >= 2
-    
-    # Confidence based on how many criteria are met
-    confidence = criteria_count / 3.0
-    
-    return {
-        'leak_status': int(is_leak),
-        'confidence': confidence,
-        'criteria_met': criteria_met,
-        'criteria_count': criteria_count,
-        'method': 'simplified_balanced',
-        'temp_stats': {
-            'mean': temp_mean,
-            'max': temp_max,
-            'threshold_used': threshold,
-            'high_temp_ratio': high_temp_ratio
+    @staticmethod
+    def balanced_leak_classification(df: pd.DataFrame, hole_size: str, file_idx: int = 0) -> Dict:
+        """SIMPLIFIED leak classification that actually works"""
+        if df.empty or 'temperature' not in df.columns:
+            return {'leak_status': 0, 'confidence': 0.0, 'criteria_met': [], 'method': 'empty'}
+        
+        # Simple, reliable threshold-based approach
+        base_threshold = Config.TEMPERATURE_THRESHOLD  # Uses 308K from config
+        
+        # Hole size adjustments (smaller effect than before)
+        hole_factors = {'20mm': 0.95, '25mm': 1.0, '30mm': 1.05, '40mm': 1.1}
+        factor = hole_factors.get(hole_size, 1.0)
+        threshold = base_threshold * factor
+        
+        # Calculate key metrics
+        temp_mean = df['temperature'].mean()
+        temp_max = df['temperature'].max()
+        high_temp_count = (df['temperature'] > threshold).sum()
+        high_temp_ratio = high_temp_count / len(df)
+        
+        criteria_met = []
+        
+        # Simple criteria (much more lenient)
+        # Criterion 1: High temperature ratio
+        high_ratio_threshold = 0.25  # 25% of readings above threshold
+        criterion_1 = high_temp_ratio > high_ratio_threshold
+        if criterion_1:
+            criteria_met.append(f"High temp ratio: {high_temp_ratio:.1%} > {high_ratio_threshold:.1%}")
+        
+        # Criterion 2: Mean temperature elevated
+        mean_threshold = threshold - 2  # 2K below main threshold
+        criterion_2 = temp_mean > mean_threshold
+        if criterion_2:
+            criteria_met.append(f"Mean temp elevated: {temp_mean:.1f}K > {mean_threshold:.1f}K")
+        
+        # Criterion 3: Maximum temperature significantly elevated
+        max_threshold = threshold + 8  # 8K above main threshold
+        criterion_3 = temp_max > max_threshold
+        if criterion_3:
+            criteria_met.append(f"Max temp high: {temp_max:.1f}K > {max_threshold:.1f}K")
+        
+        # Decision: Need at least 2 out of 3 criteria (much more balanced)
+        criteria_count = sum([criterion_1, criterion_2, criterion_3])
+        is_leak = criteria_count >= 2
+        
+        # Confidence based on how many criteria are met
+        confidence = criteria_count / 3.0
+        
+        return {
+            'leak_status': int(is_leak),
+            'confidence': confidence,
+            'criteria_met': criteria_met,
+            'criteria_count': criteria_count,
+            'method': 'simplified_balanced',
+            'temp_stats': {
+                'mean': temp_mean,
+                'max': temp_max,
+                'threshold_used': threshold,
+                'high_temp_ratio': high_temp_ratio
+            }
         }
-    }
 
 class AdvancedFeatureEngineer:
     """Feature engineering for Streamlit app"""
@@ -731,6 +729,61 @@ def show_data_upload_page():
     Config.TEMPERATURE_THRESHOLD = temp_threshold
     Config.TARGET_LEAK_RATIO = target_ratio
     Config.SENSITIVITY_LEVEL = sensitivity_level
+    
+    # Add direct CSV upload option
+    st.markdown("---")
+    st.markdown("### 🔄 Alternative: Direct CSV Upload")
+    st.markdown("Upload a CSV that already has leak_status column (0=no leak, 1=leak)")
+
+    direct_csv = st.file_uploader(
+        "Upload CSV with leak_status column",
+        type=['csv'],
+        key="direct_csv",
+        help="CSV should have columns: nodenumber, x-coordinate, y-coordinate, temperature, leak_status"
+    )
+
+    if direct_csv and st.button("📂 Load Direct CSV"):
+        try:
+            df_direct = pd.read_csv(direct_csv)
+            if 'leak_status' in df_direct.columns:
+                # Add missing columns if needed
+                if 'hole_size' not in df_direct.columns:
+                    df_direct['hole_size'] = '30mm'
+                if 'file_name' not in df_direct.columns:
+                    df_direct['file_name'] = 'direct_upload'
+                if 'leak_confidence' not in df_direct.columns:
+                    df_direct['leak_confidence'] = df_direct['leak_status'] * 0.8 + 0.1
+                if 'classification_method' not in df_direct.columns:
+                    df_direct['classification_method'] = 'direct_label'
+                if 'criteria_count' not in df_direct.columns:
+                    df_direct['criteria_count'] = df_direct['leak_status'] * 2 + 1
+                    
+                # Apply feature engineering
+                feature_engineer = AdvancedFeatureEngineer()
+                df_engineered = feature_engineer.engineer_all_features(df_direct)
+                
+                st.session_state.combined_df = df_engineered
+                st.session_state.data_loaded = True
+                
+                st.success("Direct CSV loaded successfully!")
+                
+                # Show summary
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Samples", len(df_engineered))
+                with col2:
+                    st.metric("Leak Samples", df_engineered['leak_status'].sum())
+                with col3:
+                    st.metric("No-Leak Samples", (df_engineered['leak_status'] == 0).sum())
+                with col4:
+                    st.metric("Leak Ratio", f"{df_engineered['leak_status'].mean():.1%}")
+            else:
+                st.error("CSV must contain 'leak_status' column with values 0 (no leak) or 1 (leak)")
+        except Exception as e:
+            st.error(f"Error loading direct CSV: {e}")
+
+    st.markdown("---")
+    st.markdown("### 📁 Process Individual Files")
     
     if st.button("🚀 Process Data", type="primary") and uploaded_files:
         with st.spinner("Processing uploaded files..."):
